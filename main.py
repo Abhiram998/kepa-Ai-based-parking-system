@@ -14,6 +14,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db import get_db
+from services.gemini_service import extract_plate_from_image, extract_vehicle_details
+from services.forecast_service import hybrid_forecast
 
 # =================================================================
 # ENVIRONMENT & INITIALIZATION
@@ -30,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 load_dotenv(override=True)
 DATABASE_URL = os.getenv("DATABASE_URL")
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+logger.info(f"Allowed Origins: {ALLOWED_ORIGINS}")
 
 logger.info("FastAPI booting (Production Mode)")
 logger.info("System: Nilakkal Parking Management")
@@ -791,6 +794,51 @@ def search_vehicle(q: str = Query(...), db: Session = Depends(get_db)):
         "message": "Vehicle is inside" if row["current_status"] == 'INSIDE' else f"Vehicle exited at {row.get('exit_time')}"
     }
 
+@app.post("/api/extract-plate", tags=["Operations"])
+def extract_plate(payload: dict = Body(...)):
+    """
+    Extracts license plate text from an image using Gemini AI.
+    Expected payload: { "image": "base64_string" }
+    """
+    image_base64 = payload.get("image")
+    if not image_base64:
+        raise HTTPException(status_code=400, detail="Image data is required")
+    
+    # Strip base64 prefix if present (e.g., data:image/jpeg;base64,...)
+    if "," in image_base64:
+        image_base64 = image_base64.split(",")[1]
+    
+    try:
+        plate = extract_plate_from_image(image_base64)
+        if not plate:
+            raise HTTPException(status_code=500, detail="Plate extraction failed")
+        return {"plate": plate}
+    except ValueError as ve:
+        raise HTTPException(status_code=500, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+@app.post("/api/extract-vehicle-details", tags=["Operations"])
+def extract_vehicle_details_api(payload: dict = Body(...)):
+    """
+    Extracts license plate AND vehicle type using Gemini AI.
+    Expected payload: { "image": "base64_string" }
+    """
+    image_base64 = payload.get("image")
+    if not image_base64:
+        raise HTTPException(status_code=400, detail="Image data is required")
+    
+    if "," in image_base64:
+        image_base64 = image_base64.split(",")[1]
+    
+    try:
+        details = extract_vehicle_details(image_base64)
+        return details
+    except ValueError as ve:
+        raise HTTPException(status_code=500, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
 @app.post("/api/enter", tags=["Operations"])
 def enter_vehicle(payload: dict = Body(...), db: Session = Depends(get_db)):
     """Registers a vehicle entry, assigns it to a zone, and triggers a snapshot."""
@@ -1026,132 +1074,63 @@ def get_reports(
 
 @app.get("/api/predictions", tags=["Forecast"])
 def get_predictions(db: Session = Depends(get_db)):
+    """
+    Advanced Hybrid Forecast: Combines rule-based logic with Linear Regression.
+    Uses seasonal daily peaks and current load for optimized prediction.
+    """
+    try:
+        # 1. Fetch past 7 days snapshot data for analysis
+        snapshots = db.execute(text("""
+            SELECT snapshot_time, records_count
+            FROM snapshots
+            WHERE snapshot_time >= NOW() - INTERVAL '7 days'
+            ORDER BY snapshot_time DESC
+        """)).mappings().all()
 
-    # -------------------------------------------------
-    # 1 Past 7 days peak occupancy (from snapshots)
-    # -------------------------------------------------
-    trend_rows = db.execute(text("""
-        SELECT
-            DATE(snapshot_time) AS day,
-            MAX(records_count) AS peak
-        FROM snapshots
-        WHERE snapshot_time >= NOW() - INTERVAL '7 days'
-        GROUP BY DATE(snapshot_time)
-        ORDER BY day
-    """)).mappings().all()
+        # 2. Get current system capacity & load
+        totals = db.execute(text("""
+            SELECT 
+                COALESCE(SUM(total_capacity), 1) as cap,
+                COALESCE(SUM(current_occupied), 0) as occ
+            FROM parking_zones
+            WHERE status='ACTIVE'
+        """)).mappings().first()
+        
+        cap = totals["cap"]
+        occ = totals["occ"]
+        load_percent = round((occ / cap) * 100, 1)
 
-    total_capacity = db.execute(text("""
-        SELECT COALESCE(SUM(total_capacity), 1)
-        FROM parking_zones
-        WHERE status='ACTIVE'
-    """)).scalar()
+        # 3. Call Hybrid Forecast Model from service
+        forecast_results = hybrid_forecast(snapshots, load_percent)
 
-    past7 = []
-    for r in trend_rows:
-        past7.append({
-            "day": r["day"].strftime("%a"),
-            "occupancy": round((r["peak"] / total_capacity) * 100)
-        })
+        # 4. Generate hourly curve for tomorrow (visual compatibility)
+        final_p = forecast_results["final_prediction"]
+        hourly = []
+        base_occ = final_p * 0.4
+        
+        for h in range(6):
+            hourly.append({
+                "time": f"{4 + h * 4}:00",
+                "probability": round(base_occ + (final_p - base_occ) * (h / 5))
+            })
 
-    # -------------------------------------------------
-    # 2 Trend direction (increase / decrease)
-    # -------------------------------------------------
-    if len(past7) >= 2:
-        trend_delta = past7[-1]["occupancy"] - past7[0]["occupancy"]
-    else:
-        trend_delta = 0
-
-    # Normalize trend to 0 -> 1 range
-    trend_factor = min(max(trend_delta / 20, 0), 1)
-
-    # -------------------------------------------------
-    # 3. Live occupancy pressure
-    # -------------------------------------------------
-    live_occupied = db.execute(text("""
-        SELECT COALESCE(SUM(current_occupied), 0)
-        FROM parking_zones
-        WHERE status='ACTIVE'
-    """)).scalar()
-
-    live_ratio = live_occupied / total_capacity
-
-    # -------------------------------------------------
-    # 4. Historical peak pressure
-    # -------------------------------------------------
-    peak_ratio = max(
-        (d["occupancy"] / 100 for d in past7),
-        default=0
-    )
-
-    # -------------------------------------------------
-    # 5. FINAL PROBABILITY (Weighted Model)
-    # -------------------------------------------------
-    probability = round(
-        (peak_ratio * 50) +      # history impact
-        (trend_factor * 30) +    # rising/falling trend
-        (live_ratio * 20)        # current live load
-    )
-
-    probability = min(max(probability, 0), 100)
-
-    # -------------------------------------------------
-    # 6. Hourly curve for tomorrow (frontend graph)
-    # -------------------------------------------------
-    hourly = []
-    base = probability * 0.4
-    peak = probability
-
-    for h in range(6):
-        hourly.append({
-            "time": f"{4 + h * 4}:00",
-            "probability": round(
-                base + (peak - base) * (h / 5)
-            )
-        })
-
-    # -------------------------------------------------
-    # 7️⃣ Zone-wise probability
-    # -------------------------------------------------
-    zone_rows = db.execute(text("""
-        SELECT zone_id, total_capacity, current_occupied
-        FROM parking_zones
-        WHERE status='ACTIVE'
-        ORDER BY CAST(SUBSTRING(zone_id, 2) AS INT)
-    """)).mappings().all()
-
-    zones = []
-    for z in zone_rows:
-        zone_ratio = z["current_occupied"] / max(z["total_capacity"], 1)
-        zones.append({
-            "zone": z["zone_id"],
-            "probability": round(
-                (zone_ratio * 60) + (probability * 0.4)
-            )
-        })
-
-    # -------------------------------------------------
-    # FINAL RESPONSE (SINGLE RETURN)
-    # -------------------------------------------------
-    return {
-        "tomorrow": {
-            "probability": probability,
-            "confidence": (
-                "HIGH" if probability > 70
-                else "MEDIUM" if probability > 40
-                else "LOW"
-            ),
-            "message": (
-                "High congestion expected"
-                if probability > 70
-                else "Moderate traffic expected"
-                if probability > 40
-                else "Low congestion expected"
-            )
-        },
-        "hourly": hourly,
-        "past7Days": past7,
-        "zones": zones
-    }
+        # Return required hybrid format
+        return {
+            "rule_prediction": forecast_results["rule_prediction"],
+            "ml_prediction": forecast_results["ml_prediction"],
+            "final_prediction": forecast_results["final_prediction"],
+            "traffic_level": forecast_results["traffic_level"],
+            "tomorrow": {
+                "probability": final_p,
+                "confidence": "HIGH" if final_p > 70 else "MEDIUM" if final_p > 40 else "LOW",
+                "message": forecast_results["message"]
+            },
+            "hourly": hourly,
+            "load_current": load_percent
+        }
+    except Exception as e:
+        print(f"Forecast Error: {str(e)}")
+        raise HTTPException(500, f"Failed to generate forecast: {str(e)}")
 
 # =================================================================
 # SNAPSHOT HISTORY

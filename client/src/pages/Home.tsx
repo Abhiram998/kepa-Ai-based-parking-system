@@ -1,6 +1,7 @@
 import { VehicleType } from "@/lib/parking-context";
 import { ZoneCard } from "@/components/parking/ZoneCard";
-import { MapPin, Search, MoreHorizontal, Activity, Ticket } from "lucide-react";
+import { MapPin, Search, MoreHorizontal, Activity, Ticket, ScanLine } from "lucide-react";
+import { PlateScanner } from "@/components/parking/PlateScanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
@@ -502,9 +503,47 @@ export default function Home() {
               <DialogTitle>Generate Parking Ticket</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              <div className="mb-2">
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 block">AI Scanner (Plate & Category)</Label>
+                <PlateScanner 
+                  onScanResult={(res) => {
+                    setTicketData(prev => ({ 
+                      ...prev, 
+                      vehicleNumber: res.plate || prev.vehicleNumber, 
+                      type: (res.vehicle_type as any) || prev.type 
+                    }));
+                    toast({
+                      title: "AI Analysis Complete",
+                      description: res.plate 
+                        ? `Detected: ${res.plate} (${res.vehicle_type})`
+                        : `Suggested Type: ${res.vehicle_type} (Plate not clear)`,
+                    });
+                  }} 
+                />
+              </div>
+
+              {ticketData.vehicleNumber && (
+                 <div className="flex gap-4 p-2.5 rounded-lg bg-blue-50 border border-blue-100/50 mb-2">
+                    <div className="flex-1">
+                      <p className="text-[9px] font-bold text-blue-400 uppercase leading-none mb-1">Detected Plate</p>
+                      <p className="text-sm font-black text-blue-900 font-mono tracking-tight">{ticketData.vehicleNumber}</p>
+                    </div>
+                    <div className="flex-1 border-l border-blue-200 pl-4">
+                      <p className="text-[9px] font-bold text-blue-400 uppercase leading-none mb-1">Suggested Type</p>
+                      <p className="text-sm font-bold text-blue-900 capitalize italic">{ticketData.type}</p>
+                    </div>
+                 </div>
+              )}
+
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="vehicle-no" className="text-right">Vehicle No.</Label>
-                <Input id="vehicle-no" value={ticketData.vehicleNumber} onChange={(e) => setTicketData({ ...ticketData, vehicleNumber: e.target.value })} className="col-span-3" placeholder="KL-01-AB-1234" />
+                <Input 
+                  id="vehicle-no" 
+                  value={ticketData.vehicleNumber} 
+                  onChange={(e) => setTicketData({ ...ticketData, vehicleNumber: e.target.value.toUpperCase() })} 
+                  className="col-span-3 font-mono font-bold" 
+                  placeholder="KL-01-AB-1234" 
+                />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="vehicle-type" className="text-right">Type</Label>

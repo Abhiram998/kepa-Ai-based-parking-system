@@ -1,28 +1,10 @@
-import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
+from config.database import get_db, SessionLocal, engine, test_connection
 
-load_dotenv(override=True)
+# Backward compatibility for existing code.
+# All DB configuration is now encapsulated in config/database.py.
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-)
-
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+if __name__ == "__main__":
+    if test_connection():
+        print("NPMS Database Module ready for Supabase.")
+    else:
+        print("CRITICAL: NPMS Database Module could not connect to database.")
