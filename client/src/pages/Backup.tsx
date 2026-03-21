@@ -3,7 +3,7 @@ import { useParking } from "@/lib/parking-context";
 import { Link } from "wouter";
 import { ArrowLeft, Database, RotateCcw, Loader2, Save, Download, Trash2, Calendar as CalendarIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, apiDelete } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -184,13 +184,7 @@ export default function Backup() {
     }
 
     try {
-      const response = await fetch(`/api/snapshots/${snapshotId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to delete snapshot");
-      }
+      await apiDelete(`/api/snapshots/${snapshotId}`);
 
       toast({
         title: "Snapshot Deleted",
@@ -216,14 +210,7 @@ export default function Backup() {
     }
 
     try {
-      const response = await fetch(`/api/snapshot/activate/${snapshotId}`, {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Restore failed");
-      }
+      await apiPost(`/api/snapshot/activate/${snapshotId}`, {});
 
       toast({
         title: "Snapshot Restored",

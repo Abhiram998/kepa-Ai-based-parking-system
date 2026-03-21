@@ -49,21 +49,12 @@ export default function AdminProfile() {
     e.preventDefault();
 
     try {
-      const res = await fetch("/api/admin/officers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          policeId: formData.policeId,   // ✅ correct key
-          email: formData.email,
-          password: formData.password,  // ✅ REQUIRED
-        }),
+      await apiPost("/api/admin/officers", {
+        name: formData.name,
+        policeId: formData.policeId,
+        email: formData.email,
+        password: formData.password,
       });
-
-      if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg);
-      }
 
       toast({
         title: "Officer Registered",

@@ -1,6 +1,7 @@
 import { ArrowLeft, TrendingUp, Calendar, Info } from "lucide-react";
 import { Link } from "wouter";
 import { useEffect, useState, useMemo } from "react";
+import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -51,11 +52,7 @@ export default function Predictions() {
   ========================= */
 
   useEffect(() => {
-    fetch("/api/predictions")
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load predictions");
-        return res.json();
-      })
+    apiGet<any>("/api/predictions")
       .then((data) => {
         setWeeklyData(data.past7Days || []);
         setTomorrowProbability(data.tomorrow?.probability || 0);
