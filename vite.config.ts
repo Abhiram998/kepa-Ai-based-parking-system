@@ -21,7 +21,7 @@ export default defineConfig(async () => {
     root: path.resolve(__dirname, "client"),
 
     build: {
-      outDir: path.resolve(__dirname, "dist"),
+      outDir: path.resolve(__dirname, "client/dist"),
       emptyOutDir: true,
     },
 

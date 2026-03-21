@@ -1385,12 +1385,19 @@ def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
 # =================================================================
 # STATIC FRONTEND DELIVERY (SPA SUPPORT)
 # =================================================================
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pathlib import Path
+
 BASE_DIR = Path(__file__).resolve().parent
-PUBLIC_DIR = BASE_DIR / "dist" / "public"
+PUBLIC_DIR = BASE_DIR / "client" / "dist"
 
 if PUBLIC_DIR.exists():
     print(f"Serving static files from: {PUBLIC_DIR}")
-    app.mount("/assets", StaticFiles(directory=PUBLIC_DIR / "assets"), name="assets")
+    
+    # Serve built assets (js, css)
+    if (PUBLIC_DIR / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=PUBLIC_DIR / "assets"), name="assets")
 
     @app.get("/", include_in_schema=False)
     def serve_root():
@@ -1400,12 +1407,17 @@ if PUBLIC_DIR.exists():
     @app.get("/{path:path}", include_in_schema=False)
     def serve_spa(path: str):
         """Redirects all non-API routes to index.html to support SPA routing."""
-        # Check if the requested path is an API route, if not, serve index.html
         if path.startswith("api"):
             raise HTTPException(status_code=404, detail="API endpoint not found")
+            
+        # Serve any root static files (like favicon.ico) if they exist
+        file_path = PUBLIC_DIR / path
+        if file_path.is_file():
+            return FileResponse(file_path)
+            
         return FileResponse(PUBLIC_DIR / "index.html")
 else:
-    print("Static files directory 'dist/public' not found. API-only mode active.")
+    print("Static directory 'client/dist' not found. API-only mode active.")
 
 # Final note for developer maintenance:
 # This main.py acts as the central hub. All SQL logic is kept in text() blocks 
