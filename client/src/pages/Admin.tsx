@@ -180,15 +180,15 @@ export default function Admin() {
     setIsPaused(true);
   };
 
-  const handleDeleteClick = (id: string) => {
+  const handleDeleteClick = async (id: string) => {
     if (window.confirm(`WARNING: Are you sure you want to delete Zone ${id}? This cannot be undone.`)) {
-      deleteZone(id);
+      await deleteZone(id);
     }
   };
 
   const handleSaveEdit = async () => {
     if (editingZone) {
-      updateZone(editingZone.id, formData);
+      await updateZone(editingZone.id, formData);
       setIsEditOpen(false);
       setEditingZone(null);
     }
@@ -196,7 +196,7 @@ export default function Admin() {
 
   const handleCreate = async () => {
     if (!formData.name.trim()) return alert("Zone Name is required.");
-    addZone(formData);
+    await addZone(formData);
     setIsCreateOpen(false);
     setFormData({ 
       name: "", 

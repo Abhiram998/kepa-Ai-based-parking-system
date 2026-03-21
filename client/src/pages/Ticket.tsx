@@ -19,7 +19,7 @@ export default function Ticket() {
 
   /* ================= GENERATE TICKET ================= */
 
-  const handleGenerateTicket = () => {
+  const handleGenerateTicket = async () => {
     if (!vehicleNumber.trim()) {
       toast({
         variant: "destructive",
@@ -29,7 +29,7 @@ export default function Ticket() {
       return;
     }
 
-    const result = enterVehicle(vehicleNumber, vehicleType);
+    const result = await enterVehicle(vehicleNumber, vehicleType);
 
     if (!result.success) {
       toast({
@@ -41,17 +41,17 @@ export default function Ticket() {
     }
 
     setTicket({
-      id: result.ticket.ticketId,
-      vehicle: result.ticket.vehicleNumber,
-      zone: result.ticket.zoneName,
-      slot: result.ticket.slot || "Auto Assigned",
-      entryTime: result.ticket.time,
+      id: result.ticket?.ticketId,
+      vehicle: result.ticket?.vehicleNumber,
+      zone: result.ticket?.zoneName,
+      slot: result.ticket?.slot || "Auto Assigned",
+      entryTime: result.ticket?.time,
       date: new Date().toLocaleDateString(),
     });
 
     toast({
       title: "Ticket generated",
-      description: `Vehicle parked in ${result.ticket.zoneName}`,
+      description: `Vehicle parked in ${result.ticket?.zoneName}`,
     });
 
     setVehicleNumber("");

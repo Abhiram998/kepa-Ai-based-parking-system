@@ -9,7 +9,7 @@ import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiGet, apiPost } from "@/lib/api";
 import { useEffect } from "react";
-import { useParking } from "@/lib/parking-context"; // 🔹 Added this import
+import { useParking, ParkingZone } from "@/lib/parking-context"; // 🔹 Added this import
 
 import {
   Dialog,
@@ -33,28 +33,7 @@ import {
 
 import logo from "@/assets/kerala-police-logo.jpg";
 
-type Zone = {
-  id: string;
-  name: string;
-  capacity: number;
-  occupied: number;
-  limits: {
-    heavy: number;
-    medium: number;
-    light: number;
-  };
-  stats: {
-    heavy: number;
-    medium: number;
-    light: number;
-  };
-  vehicles?: {
-    number: string;
-    type: "light" | "medium" | "heavy";
-    ticketId?: string;
-    entryTime?: string;
-  }[];
-};
+// Local Zone type removed in favor of global ParkingZone from context
 
 type VehicleSearchResult = {
   vehicle: string;
@@ -90,7 +69,7 @@ export default function Home() {
   const { isAdmin } = useParking();
 
   // 🔹 Zones from backend API
-  const [zones, setZones] = useState<Zone[]>([]);
+  const [zones, setZones] = useState<ParkingZone[]>([]);
 
   // 🔹 Derived totals
   const totalCapacity = zones.reduce((sum, z) => sum + z.capacity, 0);
@@ -102,7 +81,7 @@ export default function Home() {
   const totalVacancy = totalCapacity - totalOccupied;
 
   // State for interactive graph
-  const [hoveredZone, setHoveredZone] = useState<Zone | null>(null);
+  const [hoveredZone, setHoveredZone] = useState<ParkingZone | null>(null);
 
   // Ticket Generation State
   const [isTicketOpen, setIsTicketOpen] = useState(false);
@@ -118,7 +97,7 @@ export default function Home() {
     let isMounted = true;
 
     const fetchZones = () => {
-      apiGet<Zone[]>("/api/zones")
+      apiGet<ParkingZone[]>("/api/zones")
         .then((data) => {
           if (isMounted) setZones(data);
         })
@@ -142,6 +121,7 @@ export default function Home() {
   }, []);
 
 
+  const { enterVehicle } = useParking(); // Use context method
   const handleGenerateTicket = async () => {
     if (!ticketData.vehicleNumber) {
       toast({
@@ -152,28 +132,26 @@ export default function Home() {
       return;
     }
 
-    try {
-      await apiPost("/api/enter", {
-        vehicle: ticketData.vehicleNumber,
-        type: ticketData.type,
-        zone: ticketData.zoneId || undefined,
-        slot: ticketData.slot || undefined,
-      });
+    const result = await enterVehicle(
+      ticketData.vehicleNumber, 
+      ticketData.type, 
+      ticketData.zoneId || undefined, 
+      ticketData.slot || undefined
+    );
 
+    if (result.success) {
       toast({
         title: "Ticket Generated",
-        description: `Vehicle ${ticketData.vehicleNumber} parked successfully`,
+        description: `Vehicle ${ticketData.vehicleNumber} parked successfully in ${result.ticket?.zoneName || 'assigned zone'}`,
       });
 
       setIsTicketOpen(false);
       setTicketData({ vehicleNumber: "", zoneId: "", slot: "", type: "light" });
-      apiGet<Zone[]>("/api/zones").then(setZones);
-
-    } catch (err: any) {
+    } else {
       toast({
         variant: "destructive",
         title: "Generation Failed",
-        description: err?.message || "Could not generate ticket",
+        description: result.message || "Could not generate ticket",
       });
     }
   };

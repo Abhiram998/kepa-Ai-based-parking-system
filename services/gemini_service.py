@@ -17,8 +17,8 @@ def extract_vehicle_details(image_base64: str) -> Dict[str, str]:
 
     genai.configure(api_key=api_key)
     
-    # Using the same stable model
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # Using gemini-2.0-flash which is available and highly efficient
+    model = genai.GenerativeModel("models/gemini-2.0-flash")
 
     prompt = """
     Analyze this image and extract:

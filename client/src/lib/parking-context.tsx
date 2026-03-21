@@ -241,21 +241,22 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
 
   const enterVehicle = async (vehicleNumber: string, type: VehicleType = "light", zoneId?: string, slot?: string) => {
     try {
-      const res = await apiPost<{ success: boolean; ticket: string; }>("/api/enter", {
+      const res = await apiPost<{ success: boolean; ticket?: string; zone?: string; message?: string }>("/api/enter", {
         vehicle: vehicleNumber,
         type,
         zone: zoneId,
         slot,
       });
 
-      if (!res.success) return { success: false, message: "Entry failed" };
+      if (!res.success) return { success: false, message: res.message || "Entry failed" };
 
       await refreshData();
       return {
         success: true,
         ticket: {
           vehicleNumber,
-          ticketId: res.ticket,
+          ticketId: res.ticket || "",
+          zoneName: res.zone || "Assigned", // ✅ Included zone name from backend
           time: new Date().toLocaleTimeString(),
           type,
           slot,
