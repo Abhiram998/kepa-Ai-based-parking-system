@@ -16,8 +16,8 @@ def extract_vehicle_details(image_base64: str) -> Dict[str, str]:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
 
     genai.configure(api_key=api_key)
-    # Upgraded back to gemini-2.0-flash since Cloud Billing is now active!
-    model = genai.GenerativeModel("models/gemini-2.0-flash")
+    # Upgraded to gemini-2.5-flash which bypasses the previous quota limit error
+    model = genai.GenerativeModel("models/gemini-2.5-flash")
 
     prompt = """
     Analyze this image and extract:
