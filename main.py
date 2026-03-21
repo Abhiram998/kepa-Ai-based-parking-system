@@ -61,7 +61,8 @@ app.add_middleware(
     SessionMiddleware, 
     secret_key=os.getenv("SECRET_KEY", "super-secret-key-12345"),
     max_age=86400, # 24 hours
-    https_only=False # Allow http on localhost
+    same_site="none", # Must be 'none' for cross-domain cookies (Vercel -> Render)
+    https_only=True   # Must be True when same_site="none"
 )
 
 # =================================================================
