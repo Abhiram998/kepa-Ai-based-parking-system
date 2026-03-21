@@ -24,6 +24,10 @@ def extract_vehicle_details(image_base64: str) -> Dict[str, str]:
     1. Vehicle license plate number
     2. Vehicle type categorized strictly as one of: Light, Medium, Heavy
 
+    Number Plate Formatting Rule:
+    STRICTLY format the extracted license plate using standard Indian hyphenation (e.g., "KL-01-AB-4545" or "MH-46-X-9996").
+    Do not leave the numbers squished together. Always insert hyphens between the state code, district code, series, and unique 4-digit number.
+
     Definitions:
     * Light: Bike, scooter, car, jeep
     * Medium: Van, pickup, auto-rickshaw, mini bus
@@ -31,9 +35,10 @@ def extract_vehicle_details(image_base64: str) -> Dict[str, str]:
 
     Return ONLY valid JSON in this format:
     {
-      "plate": "...",
+      "plate": "MH-46-X-9996",
       "vehicle_type": "Light/Medium/Heavy"
     }
+
 
     If plate is not visible:
     {
