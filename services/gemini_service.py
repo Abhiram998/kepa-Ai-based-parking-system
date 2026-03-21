@@ -16,8 +16,8 @@ def extract_vehicle_details(image_base64: str) -> Dict[str, str]:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
 
     genai.configure(api_key=api_key)
-    # Downgraded to gemini-1.5-flash to avoid Google Cloud Billing requirement
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # Upgraded back to gemini-2.0-flash since Cloud Billing is now active!
+    model = genai.GenerativeModel("models/gemini-2.0-flash")
 
     prompt = """
     Analyze this image and extract:
