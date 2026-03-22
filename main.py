@@ -110,11 +110,16 @@ async def add_security_headers(request, call_next):
 
 def get_current_admin(request: Request):
     """
-    Security Dependency: Verifies that the user has a valid session cookie.
+    Security Dependency: Verifies session cookie and ADMIN role.
     """
     user = request.session.get("user")
     if not user:
         raise HTTPException(status_code=401, detail="Authentication Required")
+    
+    if user.get("role") != "ADMIN":
+        logger.warning(f"Unauthorized access attempt by {user.get('email')}")
+        raise HTTPException(status_code=403, detail="Administrator Access Level Required")
+        
     return user
 
 def trigger_auto_snapshot(db: Session):
@@ -1350,7 +1355,7 @@ def restore_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
         name_to_id = {r.zone_name: r.zone_id for r in active_zones_rows}
         fallback_zone_id = active_zones_rows[0].zone_id if active_zones_rows else None
         
-        restored_count = 0
+        restored_count: int = 0
         processed_v_ids = set() # Prevent duplicate entries using internal IDs
         
         for v in vehicles_to_restore:
@@ -1426,7 +1431,7 @@ def restore_snapshot(snapshot_id: int, db: Session = Depends(get_db)):
                 """), {"z": target_zone, "t": v_type_id})
                 db.flush() # Ensure counters are updated before next iteration
 
-                restored_count += 1
+                restored_count = restored_count + 1
             except Exception as inner_e:
                 print(f"Warning: Failed to restore vehicle {v.get('plate')}: {inner_e}")
                 continue

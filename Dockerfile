@@ -10,9 +10,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # Copy source and build
-COPY vite.config.ts tsconfig.json ./
+COPY vite.config.ts tsconfig.json package.json package-lock.json ./
 COPY client ./client
-COPY shared ./shared
 
 # Environment variables for build (if any)
 ARG VITE_API_URL
@@ -35,12 +34,14 @@ RUN apt-get update && apt-get install -y libpq-dev gcc && rm -rf /var/lib/apt/li
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy Backend Code
+# Copy Python Code Modules (CRITICAL)
 COPY main.py db.py ./
+COPY services ./services
+COPY config ./config
 COPY .env.example ./.env.example
 
-# Copy Built Frontend from Stage 1
-COPY --from=frontend_builder /app-frontend/dist/public ./dist/public
+# Copy Built Frontend from Stage 1 to the location expected by main.py
+COPY --from=frontend_builder /app-frontend/client/dist ./client/dist
 
 # Expose Port
 EXPOSE 8000

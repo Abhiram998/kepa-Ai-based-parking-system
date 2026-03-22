@@ -107,14 +107,27 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
     zonesRef.current = zones;
   }, [zones]);
 
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem("is_admin") === "true");
   const [adminUser, setAdminUser] = useState<{
     id: number;
     name: string;
     policeId: string;
     email: string;
     role: string;
-  } | null>(null);
+  } | null>(() => {
+    const saved = localStorage.getItem("admin_user");
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Sync auth state to localStorage
+  useEffect(() => {
+    localStorage.setItem("is_admin", isAdmin.toString());
+    if (adminUser) {
+      localStorage.setItem("admin_user", JSON.stringify(adminUser));
+    } else {
+      localStorage.removeItem("admin_user");
+    }
+  }, [isAdmin, adminUser]);
 
 
   // Persistence logic
