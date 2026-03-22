@@ -88,9 +88,23 @@ app.add_middleware(
 )
 
 # Enable Session Middleware for Cookies
+# SECURITY: SECRET_KEY is critical for session integrity.
+# It is loaded from an environment variable.
+# In LOCAL mode, it can come from .env file (via load_dotenv above).
+# In PRODUCTION (Render), set it in the Environment Variables dashboard.
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    # Allow local development with a warning — but log loudly so it's not missed
+    SECRET_KEY = "local-dev-insecure-key-change-me"
+    logger.warning("="*60)
+    logger.warning("⚠️  WARNING: SECRET_KEY is not set in environment!")
+    logger.warning("   Sessions are using an insecure default key.")
+    logger.warning("   Set SECRET_KEY in your .env or Render environment vars.")
+    logger.warning("="*60)
+
 app.add_middleware(
     SessionMiddleware, 
-    secret_key=os.getenv("SECRET_KEY", "super-secret-key-12345"),
+    secret_key=SECRET_KEY,
     max_age=86400, # 24 hours
     same_site="none",
     https_only=True
@@ -335,9 +349,30 @@ def root():
     }
 
 @app.get("/api/health", tags=["General"])
-def health():
-    """Diagnostic endpoint to check database connectivity configuration."""
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    """Diagnostic endpoint — pings the database to confirm connectivity."""
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        logger.error(f"Health check DB ping failed: {e}")
+        return {"status": "degraded", "database": "disconnected", "error": str(e)}
+
+@app.get("/api/me", tags=["Auth"])
+def get_current_user(request: Request):
+    """
+    Returns the current authenticated user's role and identity from session.
+    Safe to call from frontend to verify login state and role.
+    """
+    user = request.session.get("user")
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "role": user.get("role"),
+        "is_admin": user.get("role") == "ADMIN",
+    }
 
 # =================================================================
 # AGGREGATED ENDPOINTS (PERFORMANCE OPTIMIZATION)

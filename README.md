@@ -17,8 +17,13 @@ A robust, AI-powered Parking Management System designed for local deployment.
 ### 2. Configure Environment
 1. Copy the `.env.example` file and rename it to `.env`.
 2. Update the variables inside `.env`:
-   - `DATABASE_URL`: Ensure your PostgreSQL username, password, and port are correct (e.g., `postgresql://postgres:password@localhost:5432/npms`).
-   - `GEMINI_API_KEY`: Add your Google Gemini API key here for AI license plate extraction.
+   - `DATABASE_URL`: Your PostgreSQL connection string (e.g., `postgresql://postgres:password@localhost:5432/npms`).
+   - `GEMINI_API_KEY`: Your Google Gemini API key for AI license plate extraction.
+   - `SECRET_KEY` *(Required for production)*: A long random string used to sign session cookies. Generate one with:
+     ```bash
+     python -c "import secrets; print(secrets.token_hex(32))"
+     ```
+   > ⚠️ If `SECRET_KEY` is not set, the backend will start with a warning and use a weak default. **Always set this before cloud deployment (Render).**
 
 ### 3. Build the Dashboard
 *(This only needs to be done once, or whenever the UI code changes)*
@@ -56,3 +61,6 @@ Open your web browser and go to:
 - **Database Connection Error (401/500):** Check your `DATABASE_URL` in `.env`. Ensure your PostgreSQL service is running.
 - **AI Scanner Failing (429 Quota Error):** Ensure your Gemini API Key has an active billing account linked in Google AI Studio, or use the free-tier `models/gemini-2.5-flash` model.
 - **Blank White Screen / 404s:** This means the frontend hasn't been built. Make sure you run `npm run build` so that the `client/dist` folder is populated!
+- **Admin Panel Blocked (403 Forbidden):** Your account may have `OFFICER` role instead of `ADMIN`. Contact your database administrator or run: `UPDATE officers SET role = 'ADMIN' WHERE email = 'your@email.com';` in your PostgreSQL client.
+- **Check backend health:** Open `http://localhost:8000/api/health` — it will show if the database is connected.
+- **Check your login role:** Open `http://localhost:8000/api/me` (while logged in) — it will show your `role` and `is_admin` status.
