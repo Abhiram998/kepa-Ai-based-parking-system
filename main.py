@@ -13,10 +13,40 @@ from fastapi.middleware.gzip import GZipMiddleware  # Added GZip
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from db import get_db
 from services.gemini_service import extract_plate_from_image, extract_vehicle_details
 from services.forecast_service import hybrid_forecast
+
+# =================================================================
+# INPUT VALIDATION (PYDANTIC MODELS)
+# =================================================================
+
+class ZoneLimits(BaseModel):
+    heavy: int = Field(0, ge=0)
+    medium: int = Field(0, ge=0)
+    light: int = Field(0, ge=0)
+
+class ZonePayload(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    limits: ZoneLimits
+
+class TicketCreate(BaseModel):
+    vehicle: str = Field(..., min_length=3, max_length=20)
+    type: str = Field("Light", pattern="^(Heavy|Medium|Light|heavy|medium|light)$")
+    zone: Optional[str] = None
+    slot: Optional[str] = None
+
+class LoginPayload(BaseModel):
+    email: str
+    password: str
+
+class OfficerCreate(BaseModel):
+    name: str
+    policeId: str
+    email: str
+    password: str
 
 # =================================================================
 # ENVIRONMENT & INITIALIZATION
@@ -409,7 +439,7 @@ def get_zones(db: Session = Depends(get_db)):
 
 # FIX: Wrapper for frontend Add Parking Button
 @app.post("/api/zones", tags=["Dashboard"])
-def create_zone_public(payload: dict = Body(...), db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
+def create_zone_public(payload: ZonePayload, db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
     """
     Direct bridge for frontend 'Add Parking' button which calls /api/zones.
     Routes the request to the main administrative creation logic.
@@ -420,7 +450,7 @@ def create_zone_public(payload: dict = Body(...), db: Session = Depends(get_db),
 @app.put("/api/zones/{zone_id}", tags=["Dashboard"])
 def update_zone_public(
     zone_id: str,
-    payload: dict = Body(...),
+    payload: ZonePayload,
     db: Session = Depends(get_db),
     admin: dict = Depends(get_current_admin)
 ):
@@ -448,22 +478,19 @@ def delete_zone_public(
 # =================================================================
 
 @app.post("/api/admin/zones", tags=["Admin"])
-def create_zone(payload: dict = Body(...), db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
+def create_zone(payload: ZonePayload, db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
     """
     Creates a new parking zone and its associated vehicle type limits atomically.
     Calculates total capacity automatically from the provided limits.
     """
     try:
-        name = payload.get("name")
-        limits = payload.get("limits")  # Expects: { heavy: int, medium: int, light: int }
-
-        if not name or not limits:
-            raise HTTPException(400, "Zone name and vehicle limits are required")
+        name = payload.name
+        l = payload.limits
 
         # Parse and validate numbers safely
-        heavy = max(0, int(limits.get("heavy", 0)))
-        medium = max(0, int(limits.get("medium", 0)))
-        light = max(0, int(limits.get("light", 0)))
+        heavy = max(0, l.heavy)
+        medium = max(0, l.medium)
+        light = max(0, l.light)
         total = heavy + medium + light
 
         if total <= 0:
@@ -516,7 +543,7 @@ def create_zone(payload: dict = Body(...), db: Session = Depends(get_db), admin:
 @app.put("/api/admin/zones/{zone_id}", tags=["Admin"])
 def update_zone(
     zone_id: str,
-    payload: dict = Body(...),
+    payload: ZonePayload,
     db: Session = Depends(get_db),
     admin: dict = Depends(get_current_admin)
 ):
@@ -525,11 +552,8 @@ def update_zone(
     reducing capacity below the current number of vehicles parked.
     """
     try:
-        name = payload.get("name")
-        limits = payload.get("limits")
-
-        if not name or not limits:
-            raise HTTPException(400, "Zone name and limits required")
+        name = payload.name
+        l = payload.limits
 
         # Fetch existing zone data
         zone = db.execute(text("""
@@ -549,9 +573,9 @@ def update_zone(
 
         current_counts = {r.type_name.lower(): r.current_count for r in rows}
 
-        heavy = int(limits.get("heavy", 0))
-        medium = int(limits.get("medium", 0))
-        light = int(limits.get("light", 0))
+        heavy = l.heavy
+        medium = l.medium
+        light = l.light
 
         # SAFETY CHECK: Prevent reducing below active vehicles
         if heavy < current_counts.get("heavy", 0) \
@@ -647,9 +671,9 @@ def delete_zone_admin(zone_id: str, db: Session = Depends(get_db), admin: dict =
 # =================================================================
 
 @app.post("/api/admin/login", tags=["Admin"])
-def admin_login(request: Request, payload: dict = Body(...), db: Session = Depends(get_db)):
-    email = payload.get("email")
-    password = payload.get("password")
+def admin_login(request: Request, payload: LoginPayload, db: Session = Depends(get_db)):
+    email = payload.email
+    password = payload.password
 
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password required")
@@ -705,22 +729,15 @@ def admin_logout(request: Request):
     return {"success": True}
 
 @app.post("/api/admin/officers", tags=["Admin"])
-def register_officer(payload: dict = Body(...), db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
+def register_officer(payload: OfficerCreate, db: Session = Depends(get_db), admin: dict = Depends(get_current_admin)):
     """
     Registers a new parking officer.
-    Expected payload (frontend format):
-    {
-        name: string,
-        policeId: string,
-        email: string,
-        password: string
-    }
     """
 
-    name = payload.get("name")
-    police_id = payload.get("policeId")
-    email = payload.get("email")
-    password = payload.get("password")
+    name = payload.name
+    police_id = payload.policeId
+    email = payload.email
+    password = payload.password
 
     # Basic validation
     if not name or not police_id or not email or not password:
@@ -921,12 +938,12 @@ def extract_vehicle_details_api(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 @app.post("/api/enter", tags=["Operations"])
-def enter_vehicle(payload: dict = Body(...), db: Session = Depends(get_db)):
+def enter_vehicle(payload: TicketCreate, db: Session = Depends(get_db)):
     """Registers a vehicle entry, assigns it to a zone, and triggers a snapshot."""
     try:
-        vehicle = payload.get("vehicle")
-        vtype = payload.get("type", "light").capitalize()
-        zone = payload.get("zone")
+        vehicle = payload.vehicle
+        vtype = payload.type.capitalize()
+        zone = payload.zone
 
         if not vehicle:
             raise HTTPException(400, "Vehicle number required for entry")

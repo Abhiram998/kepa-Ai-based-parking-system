@@ -69,3 +69,9 @@ CREATE TABLE IF NOT EXISTS officers (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+-- 9. Indexes for Performance
+CREATE INDEX IF NOT EXISTS idx_vehicle_number ON vehicles(vehicle_number);
+CREATE INDEX IF NOT EXISTS idx_ticket_code ON parking_tickets(ticket_code);
+CREATE INDEX IF NOT EXISTS idx_entry_time ON parking_tickets(entry_time);
+CREATE INDEX IF NOT EXISTS idx_zone_status ON parking_zones(status);
