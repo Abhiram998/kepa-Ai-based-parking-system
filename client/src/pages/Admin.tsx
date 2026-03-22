@@ -54,15 +54,14 @@ import {
  */
 export default function Admin() {
   // --- Context Hooks ---
-  const { addZone, updateZone, deleteZone } = useParking();
+  const { zones, addZone, updateZone, deleteZone } = useParking();
   
   // --- Core State ---
-  const [zones, setZones] = useState<ParkingZone[]>([]);
   const [selectedZone, setSelectedZone] = useState<ParkingZone | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [zoneVehicles, setZoneVehicles] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [systemAlerts, setSystemAlerts] = useState<string[]>([]);
+  const isLoading = !zones || zones.length === 0;
   
   // --- Derived Calculations ---
   const totalCapacity = useMemo(() => {
@@ -107,30 +106,7 @@ export default function Admin() {
   }, []);
 
   // --- API Stream Synchronization ---
-  const fetchZones = useCallback(async () => {
-    try {
-      const data = await apiGet<ParkingZone[]>("/api/zones");
-      if (Array.isArray(data)) {
-        setZones(data);
-      }
-      setIsLoading(false);
-    } catch (err) {
-      console.error("ADMIN_FETCH_ERROR", err);
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-    fetchZones();
-    const interval = setInterval(() => {
-      if (isMounted) fetchZones();
-    }, 5000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [fetchZones]);
+  // --- API Stream Synchronization REMOVED: Handled by ParkingProvider ---
 
   // --- Auto-Rotation Logic ---
   useEffect(() => {

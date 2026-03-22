@@ -1,14 +1,23 @@
 import { Link, useLocation } from "wouter";
 import { Car, ShieldCheck, Home, Menu, User, BarChart3, LayoutDashboard, QrCode, FileText } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useParking } from "@/lib/parking-context";
+import { API_BASE_URL } from "@/lib/api";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
+  const { isAdmin } = useParking();
   const [location] = useLocation();
   const [isOpen, setIsOpen] = useState(false);
-  const { isAdmin } = useParking();
+
+  // Keep backend awake (Render Cold Start Fix)
+  useEffect(() => {
+    const keepWarm = setInterval(() => {
+      fetch(`${API_BASE_URL}/api/health`).catch(() => {});
+    }, 4 * 60 * 1000); // Pulse every 4 minutes (Render timeout is ~15-30m of inactivity)
+    return () => clearInterval(keepWarm);
+  }, []);
 
   // Don't show layout on login pages
   if (location === '/login' || location === '/admin/login') {

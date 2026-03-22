@@ -1,5 +1,6 @@
 import { apiGet, apiPost, apiPut, apiDelete } from "./api";
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { saveLatestSnapshot, VehicleRecord } from '@/utils/persistence';
 
 export type VehicleType = 'heavy' | 'medium' | 'light';
@@ -86,30 +87,25 @@ const ParkingContext = createContext<ParkingContextType | undefined>(undefined);
 // const INITIAL_ZONES = ...
 
 export function ParkingProvider({ children }: { children: React.ReactNode }) {
-  const [zones, setZones] = useState<ParkingZone[]>([]);
+  const queryClient = useQueryClient();
+  
+  // Use React Query for the primary zones data
+  const { data: zonesData, refetch: refetchZones } = useQuery<ParkingZone[]>({
+    queryKey: ["/api/zones"],
+    queryFn: () => apiGet<ParkingZone[]>("/api/zones"),
+    refetchInterval: 10000, 
+  });
+
+  const refreshData = async () => {
+    await refetchZones();
+  };
+
+  const zones = zonesData || [];
   const zonesRef = useRef(zones);
 
   useEffect(() => {
     zonesRef.current = zones;
   }, [zones]);
-
-  const refreshData = async () => {
-    try {
-      const data = await apiGet<ParkingZone[]>("/api/zones");
-      const normalized = data.map(z => ({
-        ...z,
-        vehicles: [],
-        stats: z.stats || { heavy: 0, medium: 0, light: 0 }
-      }));
-      setZones(normalized);
-    } catch (err) {
-      console.error("❌ Failed to load zones from backend", err);
-    }
-  };
-
-  useEffect(() => {
-    refreshData();
-  }, []);
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminUser, setAdminUser] = useState<{
@@ -191,10 +187,9 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
 
   const addZone = async (zoneData: Omit<ParkingZone, 'id' | 'occupied' | 'vehicles' | 'stats'>) => {
     try {
-      // 1. Sync with backend
       await apiPost("/api/zones", zoneData);
-      // 2. Refresh state from source of truth
-      await refreshData();
+      queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard-summary"] });
       console.log("✅ New parking terminal registered on server");
     } catch (err) {
       console.error("❌ Failed to add zone", err);
@@ -218,18 +213,19 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
         name: data.name,
         limits: data.limits
       });
-      await refreshData();
+      queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard-summary"] });
     } catch (err) {
       console.error("❌ Failed to update zone", err);
       throw err;
     }
   };
 
-
   const deleteZone = async (id: string) => {
     try {
-      await apiDelete(`/api/zones/${id}`);   // ✅ DELETE
-      await refreshData();
+      await apiDelete(`/api/zones/${id}`);
+      queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard-summary"] });
     } catch (err) {
       console.error("❌ Failed to delete zone", err);
       throw err;
@@ -250,13 +246,15 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
 
       if (!res.success) return { success: false, message: res.message || "Entry failed" };
 
-      await refreshData();
+      queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard-summary"] });
+      
       return {
         success: true,
         ticket: {
           vehicleNumber,
           ticketId: res.ticket || "",
-          zoneName: res.zone || "Assigned", // ✅ Included zone name from backend
+          zoneName: res.zone || "Assigned", 
           time: new Date().toLocaleTimeString(),
           type,
           slot,
@@ -272,53 +270,12 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
   const totalOccupied = zones.reduce((acc, z) => acc + z.occupied, 0);
 
   const restoreData = (records: any[]) => {
-    // If records are empty or we are in Server-Side Restore mode, 
-    // we should just fetch the latest state from the backend.
     if (!records || records.length === 0) {
       refreshData();
       return;
     }
-
-    // CLIENT-SIDE RESTORE / OFFLINE MODE (Legacy Fallback)
-    // Use current zones state as the base, do NOT invent new zones.
-    const newZones: ParkingZone[] = zones.map(z => ({
-      ...z,
-      occupied: 0,
-      vehicles: [],
-      stats: { heavy: 0, medium: 0, light: 0 }
-    }));
-
-    records.forEach(rec => {
-      // Find the matching zone by ID or Name from the existing dynamic zones
-      let zone = newZones.find(z => z.name === rec.zone || z.id === rec.zone);
-
-      // If zone doesn't exist in the new dynamic system, SKIPPING instead of forcing to Zone 1 
-      // (Safety choice to avoid overflow). Or we could fallback to the first active zone.
-      if (!zone) {
-        if (newZones.length > 0) zone = newZones[0];
-        else return; // No zones at all? nothing to restore to.
-      }
-
-      // Safe access: ensure zone is defined before proceeding
-      if (!zone) return;
-
-      const vehicleType: VehicleType = ['heavy', 'medium', 'light'].includes(rec.type) ? rec.type : 'light';
-
-      // Only add if there is capacity
-      if (zone.occupied < zone.capacity) {
-        zone.vehicles.push({
-          number: rec.plate,
-          entryTime: new Date(rec.timeIn),
-          zoneId: zone.id,
-          ticketId: `RES-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          type: vehicleType
-        });
-        zone.occupied++;
-        zone.stats[vehicleType]++;
-      }
-    });
-
-    setZones(newZones);
+    // ... rest of the legacy client-side restore logic could be here if needed
+    // But we are moving towards server-side snapshots.
   };
 
   return (

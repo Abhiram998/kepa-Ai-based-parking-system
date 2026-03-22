@@ -9,7 +9,16 @@ import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiGet, apiPost } from "@/lib/api";
 import { useEffect } from "react";
-import { useParking, ParkingZone } from "@/lib/parking-context"; // 🔹 Added this import
+import { useParking, ParkingZone } from "@/lib/parking-context";
+import { useQuery } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
+
+interface DashboardSummary {
+  zones: ParkingZone[];
+  total_capacity: number;
+  total_occupied: number;
+  total_vacancy: number;
+}
 
 import {
   Dialog,
@@ -66,26 +75,30 @@ const formatTime = (ts?: string) => {
 
 export default function Home() {
   // 🔐 FIXED: Now using the real global state instead of hardcoded true
-  const { isAdmin } = useParking();
-
-  // 🔹 Zones from backend API
-  const [zones, setZones] = useState<ParkingZone[]>([]);
-
-  // 🔹 Derived totals
-  const totalCapacity = zones.reduce((sum, z) => sum + z.capacity, 0);
-  const totalOccupied = zones.reduce((sum, z) => sum + z.occupied, 0);
-
+  const { isAdmin, enterVehicle } = useParking();
   const { toast } = useToast();
 
-  // Calculate vacancy
-  const totalVacancy = totalCapacity - totalOccupied;
+  // 🔹 Use React Query for performance & caching
+  const { data: dashboardData, isLoading, isError } = useQuery<DashboardSummary>({
+    queryKey: ["/api/dashboard-summary"],
+    queryFn: () => apiGet<DashboardSummary>("/api/dashboard-summary"),
+    refetchInterval: 10000, // Refresh every 10 seconds (background)
+  });
+
+  // 🔹 Zones from backend API
+  const zones = dashboardData?.zones || [];
+
+  // 🔹 Derived totals from aggregated data
+  const totalCapacity = dashboardData?.total_capacity || 0;
+  const totalOccupied = dashboardData?.total_occupied || 0;
+  const totalVacancy = dashboardData?.total_vacancy || 0;
 
   // State for interactive graph
   const [hoveredZone, setHoveredZone] = useState<ParkingZone | null>(null);
 
   // Ticket Generation State
   const [isTicketOpen, setIsTicketOpen] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false); // New State
+  const [isSearchOpen, setIsSearchOpen] = useState(false); 
   const [ticketData, setTicketData] = useState({
     vehicleNumber: "",
     zoneId: "",
@@ -93,35 +106,20 @@ export default function Home() {
     type: "light" as VehicleType
   });
 
-  useEffect(() => {
-    let isMounted = true;
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResult, setSearchResult] = useState<VehicleSearchResult | null>(null);
 
-    const fetchZones = () => {
-      apiGet<ParkingZone[]>("/api/zones")
-        .then((data) => {
-          if (isMounted) setZones(data);
-        })
-        .catch((err) => {
-          console.error("Failed to load zones", err);
-          toast({
-            variant: "destructive",
-            title: "API Error",
-            description: "Unable to load parking zones from server",
-          });
-        });
-    };
-
-    fetchZones();
-    const interval = setInterval(fetchZones, 5000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
-
-
-  const { enterVehicle } = useParking(); // Use context method
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 text-center h-[70vh]">
+        <div className="text-destructive mb-4 text-4xl font-bold">Connection Error</div>
+        <p className="text-muted-foreground max-w-md">
+          Unable to connect to the parking backup server. Please check your internet or wait for the system to wake up.
+        </p>
+        <Button onClick={() => window.location.reload()} className="mt-6">Try Again</Button>
+      </div>
+    );
+  }
   const handleGenerateTicket = async () => {
     if (!ticketData.vehicleNumber) {
       toast({
@@ -203,10 +201,6 @@ export default function Home() {
     { name: 'Light', value: activeStats.light, color: '#3b82f6' },
   ];
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResult, setSearchResult] = useState<VehicleSearchResult | null>(null);
-
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -257,54 +251,65 @@ export default function Home() {
 
       {/* Top Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <TopCard title="Vacancy" value={totalVacancy} dark={true} isVacancy={true} />
-        <TopCard title="Occupancy" value={totalOccupied} />
-        <TopCard title="Total Capacity" value={totalCapacity} />
+        {isLoading ? (
+          <>
+            <Skeleton className="h-[74px] rounded-xl" />
+            <Skeleton className="h-[74px] rounded-xl" />
+            <Skeleton className="h-[74px] rounded-xl" />
+            <Skeleton className="h-[74px] rounded-xl" />
+          </>
+        ) : (
+          <>
+            <TopCard title="Vacancy" value={totalVacancy} dark={true} isVacancy={true} />
+            <TopCard title="Occupancy" value={totalOccupied} />
+            <TopCard title="Total Capacity" value={totalCapacity} />
 
-        <div className="rounded-xl p-3 shadow-sm border bg-white border-slate-100 h-full flex items-center gap-3">
-          <div className="w-[70px] h-[70px] relative flex-shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  innerRadius={25}
-                  outerRadius={35}
-                  paddingAngle={0}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="text-xs font-bold text-slate-700">{activeOccupancyRate}%</span>
-            </div>
-          </div>
-
-          <div className="flex-1 flex flex-col justify-center gap-1">
-            <div className="flex justify-between items-center border-b border-slate-50 pb-1 mb-1">
-              <span className="font-medium text-slate-500 text-xs">Composition</span>
-              <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full">
-                {hoveredZone ? `P${zones.findIndex(z => z.id === hoveredZone.id) + 1}` : "Total"}
-              </span>
-            </div>
-
-            <div className="space-y-0.5">
-              {pieData.map((item, index) => (
-                <div key={index} className="flex items-center justify-between text-[10px]">
-                  <div className="flex items-center gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-slate-500">{item.name}</span>
-                  </div>
-                  <span className="font-bold text-slate-700">{item.value}</span>
+            <div className="rounded-xl p-3 shadow-sm border bg-white border-slate-100 h-full flex items-center gap-3">
+              <div className="w-[70px] h-[70px] relative flex-shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      innerRadius={25}
+                      outerRadius={35}
+                      paddingAngle={0}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {pieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="text-xs font-bold text-slate-700">{activeOccupancyRate}%</span>
                 </div>
-              ))}
+              </div>
+
+              <div className="flex-1 flex flex-col justify-center gap-1">
+                <div className="flex justify-between items-center border-b border-slate-50 pb-1 mb-1">
+                  <span className="font-medium text-slate-500 text-xs">Composition</span>
+                  <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full">
+                    {hoveredZone ? `P${zones.findIndex(z => z.id === hoveredZone.id) + 1}` : "Total"}
+                  </span>
+                </div>
+
+                <div className="space-y-0.5">
+                  {pieData.map((item, index) => (
+                    <div key={index} className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
+                        <span className="text-slate-500">{item.name}</span>
+                      </div>
+                      <span className="font-bold text-slate-700">{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* Main Grid */}
@@ -312,122 +317,134 @@ export default function Home() {
         <div className="space-y-6">
 
           {/* Bar Chart Section */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-4">
-                <h3 className="font-bold text-slate-700">Live Parking Zone Status (Occupancy %)</h3>
-
-                {/* 🔐 FEATURE GUARD 1: Generate Ticket (Police Only) */}
-                {isAdmin && (
-                  <Button size="sm" onClick={() => setIsTicketOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
-                    <Ticket className="w-4 h-4" /> Generate Ticket
-                  </Button>
-                )}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 min-h-[400px]">
+            {isLoading ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-8 w-64" />
+                  <Skeleton className="h-8 w-32" />
+                </div>
+                <Skeleton className="h-[300px] w-full" />
               </div>
-              <div className="hidden md:flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-[#1e293b] rounded-sm"></div>
-                  <span className="text-xs text-slate-500">Heavy</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-[#f59e0b] rounded-sm"></div>
-                  <span className="text-xs text-slate-500">Medium</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-[#3b82f6] rounded-sm"></div>
-                  <span className="text-xs text-slate-500">Light</span>
-                </div>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-4">
+                    <h3 className="font-bold text-slate-700">Live Parking Zone Status (Occupancy %)</h3>
 
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={barChartData}
-                  barSize={24}
-                  margin={{ top: 20, right: 10, left: 0, bottom: 5 }}
-                  onMouseMove={(state: any) => {
-                    if (state.activePayload) {
-                      setHoveredZone(state.activePayload[0].payload.originalZone);
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredZone(null);
-                  }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#64748b', fontSize: 13, fontWeight: 500 }}
-                    dy={10}
-                    interval={0}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#64748b', fontSize: 12 }}
-                    unit="%"
-                    domain={[0, 100]}
-                    allowDataOverflow={true}
-                  />
-                  <Tooltip
-                    cursor={{ fill: '#f8fafc' }}
-                    content={({ active, payload, label }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        const originalZone = data.originalZone;
-                        return (
-                          <div className="bg-white p-3 border border-slate-100 shadow-xl rounded-lg text-sm">
-                            <p className="font-bold text-slate-800 mb-2">{label}</p>
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between gap-4 text-xs">
-                                <span className="flex items-center gap-1.5 text-slate-500">
-                                  <div className="w-2 h-2 rounded-full bg-[#1e293b]"></div>
-                                  Heavy
-                                </span>
-                                <span className="font-mono font-medium">
-                                  {originalZone.stats.heavy} / {originalZone.limits?.heavy || '-'} ({data.Heavy.toFixed(1)}%)
-                                </span>
+                    {/* 🔐 FEATURE GUARD 1: Generate Ticket (Police Only) */}
+                    {isAdmin && (
+                      <Button size="sm" onClick={() => setIsTicketOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
+                        <Ticket className="w-4 h-4" /> Generate Ticket
+                      </Button>
+                    )}
+                  </div>
+                  <div className="hidden md:flex items-center gap-6">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 bg-[#1e293b] rounded-sm"></div>
+                      <span className="text-xs text-slate-500">Heavy</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 bg-[#f59e0b] rounded-sm"></div>
+                      <span className="text-xs text-slate-500">Medium</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 bg-[#3b82f6] rounded-sm"></div>
+                      <span className="text-xs text-slate-500">Light</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={barChartData}
+                      barSize={24}
+                      margin={{ top: 20, right: 10, left: 0, bottom: 5 }}
+                      onMouseMove={(state: any) => {
+                        if (state.activePayload) {
+                          setHoveredZone(state.activePayload[0].payload.originalZone);
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredZone(null);
+                      }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#64748b', fontSize: 13, fontWeight: 500 }}
+                        dy={10}
+                        interval={0}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#64748b', fontSize: 12 }}
+                        unit="%"
+                        domain={[0, 100]}
+                        allowDataOverflow={true}
+                      />
+                      <Tooltip
+                        cursor={{ fill: '#f8fafc' }}
+                        content={({ active, payload, label }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload;
+                            const originalZone = data.originalZone;
+                            return (
+                              <div className="bg-white p-3 border border-slate-100 shadow-xl rounded-lg text-sm">
+                                <p className="font-bold text-slate-800 mb-2">{label}</p>
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-between gap-4 text-xs">
+                                    <span className="flex items-center gap-1.5 text-slate-500">
+                                      <div className="w-2 h-2 rounded-full bg-[#1e293b]"></div>
+                                      Heavy
+                                    </span>
+                                    <span className="font-mono font-medium">
+                                      {originalZone.stats.heavy} / {originalZone.limits?.heavy || '-'} ({data.Heavy.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-4 text-xs">
+                                    <span className="flex items-center gap-1.5 text-slate-500">
+                                      <div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div>
+                                      Medium
+                                    </span>
+                                    <span className="font-mono font-medium">
+                                      {originalZone.stats.medium} / {originalZone.limits?.medium || '-'} ({data.Medium.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-4 text-xs">
+                                    <span className="flex items-center gap-1.5 text-slate-500">
+                                      <div className="w-2 h-2 rounded-full bg-[#3b82f6]"></div>
+                                      Light
+                                    </span>
+                                    <span className="font-mono font-medium">
+                                      {originalZone.stats.light} / {originalZone.limits?.light || '-'} ({data.Light.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex items-center justify-between gap-4 text-xs">
-                                <span className="flex items-center gap-1.5 text-slate-500">
-                                  <div className="w-2 h-2 rounded-full bg-[#f59e0b]"></div>
-                                  Medium
-                                </span>
-                                <span className="font-mono font-medium">
-                                  {originalZone.stats.medium} / {originalZone.limits?.medium || '-'} ({data.Medium.toFixed(1)}%)
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-4 text-xs">
-                                <span className="flex items-center gap-1.5 text-slate-500">
-                                  <div className="w-2 h-2 rounded-full bg-[#3b82f6]"></div>
-                                  Light
-                                </span>
-                                <span className="font-mono font-medium">
-                                  {originalZone.stats.light} / {originalZone.limits?.light || '-'} ({data.Light.toFixed(1)}%)
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Bar dataKey="Heavy" fill="#1e293b" radius={[4, 4, 0, 0]} name="Heavy">
-                    <LabelList dataKey="Heavy" position="center" angle={-90} formatter={(value: number) => value > 0 ? `${Math.round(value)}%` : ''} style={{ fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }} />
-                  </Bar>
-                  <Bar dataKey="Medium" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Medium">
-                    <LabelList dataKey="Medium" position="center" angle={-90} formatter={(value: number) => value > 0 ? `${Math.round(value)}%` : ''} style={{ fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }} />
-                  </Bar>
-                  <Bar dataKey="Light" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Light">
-                    <LabelList dataKey="Light" position="center" angle={-90} formatter={(value: number) => value > 0 ? `${Math.round(value)}%` : ''} style={{ fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Bar dataKey="Heavy" fill="#1e293b" radius={[4, 4, 0, 0]} name="Heavy">
+                        <LabelList dataKey="Heavy" position="center" angle={-90} formatter={(value: number) => value > 0 ? `${Math.round(value)}%` : ''} style={{ fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }} />
+                      </Bar>
+                      <Bar dataKey="Medium" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Medium">
+                        <LabelList dataKey="Medium" position="center" angle={-90} formatter={(value: number) => value > 0 ? `${Math.round(value)}%` : ''} style={{ fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }} />
+                      </Bar>
+                      <Bar dataKey="Light" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Light">
+                        <LabelList dataKey="Light" position="center" angle={-90} formatter={(value: number) => value > 0 ? `${Math.round(value)}%` : ''} style={{ fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }} />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Bottom Section: Live Zone Overview & Search */}
@@ -457,13 +474,19 @@ export default function Home() {
             </div>
 
             <div className="max-h-[500px] overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-5 lg:grid-cols-10 gap-2">
-              {zones.map((zone, index) => (
-                <ZoneCard
-                  key={zone.id}
-                  zone={zone}              // ✅ backend ID untouched
-                  displayIndex={index + 1} // ✅ UI-only numbering
-                />
-              ))}
+              {isLoading ? (
+                  Array.from({ length: 10 }).map((_, i) => (
+                    <Skeleton key={i} className="h-24 w-full rounded-lg" />
+                  ))
+                ) : (
+                zones.map((zone, index) => (
+                  <ZoneCard
+                    key={zone.id}
+                    zone={zone}              // ✅ backend ID untouched
+                    displayIndex={index + 1} // ✅ UI-only numbering
+                  />
+                ))
+              )}
             </div>
           </div>
 

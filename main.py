@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Depends, Body, Query, Request, Respo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware  # Added GZip
 from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -61,9 +62,28 @@ app.add_middleware(
     SessionMiddleware, 
     secret_key=os.getenv("SECRET_KEY", "super-secret-key-12345"),
     max_age=86400, # 24 hours
-    same_site="none", # Must be 'none' for cross-domain cookies (Vercel -> Render)
-    https_only=True   # Must be True when same_site="none"
+    same_site="none",
+    https_only=True
 )
+
+# Enable GZip Compression for Network Optimization
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# =================================================================
+# PERFORMANCE CACHING
+# =================================================================
+import time
+query_cache = {}
+
+def get_cached_response(key: str, ttl: int = 30):
+    if key in query_cache:
+        data, timestamp = query_cache[key]
+        if time.time() - timestamp < ttl:
+            return data
+    return None
+
+def set_cached_response(key: str, data: dict):
+    query_cache[key] = (data, time.time())
 
 # =================================================================
 # SECURITY: HARDENING MIDDLEWARE
@@ -80,6 +100,7 @@ async def add_security_headers(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY" 
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Connection"] = "keep-alive" # HTTP Keep-Alive
     # Note: CSP is omitted to prevent breaking external fonts/scripts without deep analysis
     return response
 
@@ -281,11 +302,65 @@ def root():
 @app.get("/api/health", tags=["General"])
 def health():
     """Diagnostic endpoint to check database connectivity configuration."""
-    return {
-        "status": "ok", 
-        "db_configured": DATABASE_URL is not None,
-        "environment": os.getenv("RAILWAY_ENVIRONMENT", "production")
+    return {"status": "ok"}
+
+# =================================================================
+# AGGREGATED ENDPOINTS (PERFORMANCE OPTIMIZATION)
+# =================================================================
+@app.get("/api/dashboard-summary", tags=["Dashboard"])
+def get_dashboard_summary(db: Session = Depends(get_db)):
+    """Combines zones, total capacity, and occupancy into a single API call."""
+    cached = get_cached_response("dashboard_summary", ttl=15)
+    if cached:
+        return cached
+
+    zones = get_zones(db)
+    total_capacity = sum(z["capacity"] for z in zones)
+    total_occupied = sum(z["occupied"] for z in zones)
+    
+    response = {
+        "zones": zones,
+        "total_capacity": total_capacity,
+        "total_occupied": total_occupied,
+        "total_vacancy": total_capacity - total_occupied,
     }
+    set_cached_response("dashboard_summary", response)
+    return response
+
+@app.get("/api/vehicles-summary", tags=["Dashboard"])
+def get_vehicles_summary(db: Session = Depends(get_db)):
+    """Groups vehicles inside and exited recently."""
+    cached = get_cached_response("vehicles_summary", ttl=30)
+    if cached:
+        return cached
+
+    # Aggregated query optimized with joins
+    rows = db.execute(text("""
+        SELECT
+            vt.type_name as type,
+            COUNT(*) as count
+        FROM parking_tickets pt
+        JOIN vehicles v ON pt.vehicle_id = v.vehicle_id
+        JOIN vehicle_types vt ON v.vehicle_type_id = vt.id
+        WHERE pt.exit_time IS NULL
+        GROUP BY vt.type_name
+    """)).fetchall()
+
+    vehicles = {r.type.lower(): r.count for r in rows}
+    set_cached_response("vehicles_summary", vehicles)
+    return vehicles
+
+@app.get("/api/tickets-summary", tags=["Dashboard"])
+def get_tickets_summary(db: Session = Depends(get_db)):
+    """Groups ticket revenue or total active tickets."""
+    cached = get_cached_response("tickets_summary", ttl=30)
+    if cached:
+        return cached
+
+    total = db.execute(text("SELECT COUNT(*) FROM parking_tickets WHERE exit_time IS NULL")).scalar()
+    res = {"active_tickets": total}
+    set_cached_response("tickets_summary", res)
+    return res
 
 # =================================================================
 # LIVE DASHBOARD & ZONE MANAGEMENT (FRONTEND WRAPPERS)
