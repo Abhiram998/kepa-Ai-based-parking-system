@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
+import collections
+from datetime import datetime, date, timedelta
 
 from db import get_db
 from services.gemini_service import extract_plate_from_image, extract_vehicle_details
@@ -1213,6 +1215,10 @@ def get_predictions(db: Session = Depends(get_db)):
     Advanced Hybrid Forecast: Combines rule-based logic with Linear Regression.
     Uses seasonal daily peaks and current load for optimized prediction.
     """
+    cached = get_cached_response("predictions_forecast", ttl=60) # Cache for 1 minute
+    if cached:
+        return cached
+
     try:
         # 1. Fetch past 7 days snapshot data for analysis
         snapshots = db.execute(text("""
@@ -1250,9 +1256,6 @@ def get_predictions(db: Session = Depends(get_db)):
             })
 
         # 5. Generate Past 7 Days trend
-        import collections
-        from datetime import datetime, timedelta
-        
         days_names = [(datetime.now() - timedelta(days=i)).strftime("%a") for i in range(6, -1, -1)]
         daily_max = collections.defaultdict(int)
         for s in snapshots:

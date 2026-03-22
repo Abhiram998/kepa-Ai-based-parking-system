@@ -82,7 +82,14 @@ export default function Home() {
   const { data: dashboardData, isLoading, isError } = useQuery<DashboardSummary>({
     queryKey: ["/api/dashboard-summary"],
     queryFn: () => apiGet<DashboardSummary>("/api/dashboard-summary"),
-    refetchInterval: 10000, // Refresh every 10 seconds (background)
+    refetchInterval: 10000,
+  });
+
+  // 🔹 Prediction data for the preview
+  const { data: predictionData } = useQuery<any>({
+    queryKey: ["/api/predictions"],
+    queryFn: () => apiGet<any>("/api/predictions"),
+    refetchInterval: 300000, // Refresh every 5 minutes
   });
 
   // 🔹 Zones from backend API
@@ -311,6 +318,34 @@ export default function Home() {
           </>
         )}
       </div>
+
+      {/* Smart Forecast Preview - NEW */}
+      {!isLoading && predictionData && (
+        <Link href="/predictions">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-4 shadow-md text-white flex items-center justify-between cursor-pointer hover:shadow-lg transition-all group overflow-hidden relative">
+            <div className="absolute right-0 top-0 h-full w-32 bg-white/10 skew-x-12 transform translate-x-10 group-hover:translate-x-5 transition-transform duration-500" />
+            <div className="flex items-center gap-4 relative z-10">
+              <div className="bg-white/20 p-2.5 rounded-lg backdrop-blur-sm border border-white/30">
+                <Activity className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg leading-tight">Smart Forecast Outlook</h3>
+                <p className="text-white/80 text-xs text-blue-50/70">AI-powered parking predictions for tomorrow</p>
+              </div>
+            </div>
+            
+            <div className="text-right flex items-center gap-4 relative z-10">
+              <div className="hidden sm:block">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/70">Congestion</p>
+                <p className="text-xl font-black">{predictionData.tomorrow?.probability}%</p>
+              </div>
+              <div className="bg-white text-blue-600 px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm group-hover:bg-blue-50 transition-colors">
+                View Forecast
+              </div>
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 gap-6 h-full mt-2">
