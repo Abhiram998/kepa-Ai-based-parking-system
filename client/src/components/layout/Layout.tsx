@@ -33,12 +33,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </Link>
 
-      <Link href="/predictions">
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors cursor-pointer ${location === '/predictions' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-primary'}`}>
-          <BarChart3 className="w-4 h-4" />
-          <span>Forecast</span>
-        </div>
-      </Link>
+      {!isAdmin && (
+        <Link href="/predictions">
+          <div className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors cursor-pointer ${location === '/predictions' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-primary'}`}>
+            <BarChart3 className="w-4 h-4" />
+            <span>Forecast</span>
+          </div>
+        </Link>
+      )}
       
       {isAdmin && (
         <div className="flex items-center gap-1">
