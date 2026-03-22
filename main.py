@@ -154,15 +154,17 @@ async def add_security_headers(request, call_next):
 
 def get_current_admin(request: Request):
     """
-    Security Dependency: Verifies session cookie and ADMIN role.
+    Security Dependency: Verifies session cookie and checks for ADMIN or OFFICER roles.
+    Both roles now have equal access in this environment.
     """
     user = request.session.get("user")
     if not user:
         raise HTTPException(status_code=401, detail="Authentication Required")
     
-    if user.get("role") != "ADMIN":
+    # Both ADMIN and OFFICER roles have identical management permissions.
+    if user.get("role") not in ["ADMIN", "OFFICER"]:
         logger.warning(f"Unauthorized access attempt by {user.get('email')}")
-        raise HTTPException(status_code=403, detail="Administrator Access Level Required")
+        raise HTTPException(status_code=403, detail="System Access level required.")
         
     return user
 
@@ -371,7 +373,7 @@ def get_current_user(request: Request):
         "id": user.get("id"),
         "email": user.get("email"),
         "role": user.get("role"),
-        "is_admin": user.get("role") == "ADMIN",
+        "is_admin": user.get("role") in ["ADMIN", "OFFICER"],
     }
 
 # =================================================================
